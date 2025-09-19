@@ -9,11 +9,9 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧭 AI Tour Guide: Paris</h1>
+            <h2>🧭 AI Tour Guide: Paris</h2>
             <p>Hi! I'm Alex, your personal guide to the City of Light. What would you like to explore?</p>
         </div>
-
-        <a href="{{ url_for('clear_chat') }}" class="clear-button">Clear Conversation</a>
 
         <div class="chat-history">
             {% for message in chat_history %}
@@ -26,10 +24,12 @@
         <div class="input-area">
             <form method="POST" action="{{ url_for('index') }}">
                 <input type="text" id="user-input" name="user_input" placeholder="Ask about a landmark, history, or food..." autocomplete="off" required>
-                <span><button id="send-button" type="submit">Send</button></span>
+                <span>
+                    <button id="send-button" type="submit">Send</button>        
+                </span>
             </form>
         </div>
+        <a href="{{ url_for('clear_chat') }}" class="clear-button">Clear Chat</a>
     </div>
-<script></script>
 </body>
 </html>
