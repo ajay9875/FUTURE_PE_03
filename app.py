@@ -64,7 +64,7 @@ Your first priority is to deliver a comprehensive, satisfying response to the us
 7.  **Scope Handling:** If asked about something completely outside Telangana tourism, politely guide the conversation back:
     Example: "While I specialize in Telangana tourism, I'd be happy to help you explore the beautiful destinations within our state. Were you interested in any specific place in Telangana?"
 
-8.  **Length:** Always try to keep a complete responses, under 150 words if possible. Be engaging but concise. Prioritize the most critical information to stay within the limit. Avoid long lists unless specifically requested.
+8.  **Length:** Always try to keep a complete responses under 250 words if possible, otherwise consider breaking it into multiple messages. Be engaging but concise. Prioritize the most critical information to stay within the limit. Avoid long lists unless specifically requested.
 
 9.  **Cultural Sensitivity:** Be respectful of all cultures, religions, and traditions. Highlight the diversity and harmony of Telangana's heritage.
 
@@ -92,7 +92,7 @@ def index():
 
             try:
                 # Use Gemini API
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-2.0-flash")
 
                 # Prepare the conversation history for Gemini
                 conversation = [TOUR_GUIDE_SYSTEM_PROMPT]
