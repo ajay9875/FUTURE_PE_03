@@ -2,35 +2,37 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Tour Guide - Telangana</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h2>🧭 AI Tour Guide: Telangana</h2>
-            <p>Hi! I'm Alex, your personal guide to the beautiful state of Telangana. What would you like to explore?</p>
-        </div>
+<div class="container">
 
-        <div class="chat-history">
-            {% for message in chat_history %}
-                <div class="message {{ 'user-message' if message.role == 'user' else 'bot-message' }}">
-                    {{ message.text }}
-                </div>
-            {% endfor %}
-        </div>
-
-        <div class="input-area">
-            <form method="POST" action="{{ url_for('index') }}">
-                <input type="text" id="user-input" name="user_input" placeholder="Ask about a landmark, history, or food..." autocomplete="off" required>
-                <span>
-                    <button id="send-button" type="submit">Send</button>        
-                </span>
-            </form>
-        </div>
-        <a href="{{ url_for('clear_chat') }}" class="clear-button">Clear Chat</a>
+    <div class="header">
+        <h2>🧭 AI Tour Guide: Telangana</h2>
+        <p>Hi! I'm Alex, your personal guide to Telangana.</p>
     </div>
+
+    <div class="chat-history" id="chat-history">
+        {% for message in chat_history %}
+            <div class="message {{ 'user-message' if message.role == 'user' else 'bot-message' }}">
+                {{ message.text }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="input-area">
+        <input type="text" id="user-input"
+               placeholder="Ask about a landmark, history, or food..."
+               autocomplete="off">
+        <button id="send-button">Send</button>
+    </div>
+
+    <button class="clear-button" id="clear-chat">Clear Chat</button>
+
+</div>
+
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

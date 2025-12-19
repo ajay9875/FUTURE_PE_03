@@ -1,18 +1,28 @@
-from flask import Flask, request, render_template, session, redirect, url_for
-import google.generativeai as genai
+from flask import Flask, request, render_template, session, jsonify
+import google.genai as genai
 from google.api_core import exceptions as google_exceptions
 import os
 from dotenv import load_dotenv
+from google.genai import Client
 
-# Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "your_secret_key")
 
-# Configure Gemini API
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# ---------------- CONFIG ----------------
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY missing")
 
+app.secret_key = SECRET_KEY
+
+# Get your API key from environment variable
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Initialize the client
+client = Client(api_key=GEMINI_API_KEY)
+
+# -------------------- SYSTEM PROMPT --------------------
 TOUR_GUIDE_SYSTEM_PROMPT = """
 You are 'Telangana Guide', an enthusiastic, knowledgeable, and friendly AI tour guide specializing in the beautiful state of Telangana, India.
 Your primary role is to provide engaging, informative, and concise answers about Telangana's rich heritage, cities, tourist destinations, culture, history, cuisine, and festivals.
@@ -74,72 +84,73 @@ Your first priority is to deliver a comprehensive, satisfying response to the us
 - "Which aspect of Telangana travel can I assist with today - suggesting destinations, planning your budget, or giving you packing recommendations?"
 """
 
-@app.route('/', methods=['GET', 'POST'])
+# -------------------- ROUTES --------------------
+# ---------------- PAGE ----------------
+@app.route("/")
 def index():
-    # Initialize chat history in session if not exists
-    if 'chat_history' not in session:
-        session['chat_history'] = []
-    
-    chat_history = session['chat_history']
-    ai_response = ""
+    if "chat_history" not in session:
+        session["chat_history"] = []
+    return render_template("index.html", chat_history=session["chat_history"])
 
-    if request.method == 'POST':
-        user_input = request.form.get('user_input', '').strip()
-        
-        if user_input:
-            # Add user message to history
-            chat_history.append({'role': 'user', 'text': user_input})
+# ---------------- CHAT API ----------------
+@app.route("/chat", methods=["POST"])
+def chat():
+    try:
+        data = request.get_json()
+        user_input = data.get("message", "").strip()
 
-            try:
-                # Use Gemini API
-                model = genai.GenerativeModel("gemini-2.0-flash")
+        if not user_input:
+            return jsonify({"reply": "⚠️ Please enter a message."})
 
-                # Prepare the conversation history for Gemini
-                conversation = [TOUR_GUIDE_SYSTEM_PROMPT]
-                for msg in chat_history:
-                    if msg['role'] == 'user':
-                        conversation.append(f"User: {msg['text']}")
-                    else:
-                        conversation.append(f"Assistant: {msg['text']}")
-                
-                # Join the conversation into a single prompt
-                full_prompt = "\n".join(conversation) + "\nAssistant:"
-                
-                response = model.generate_content(
-                    full_prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        max_output_tokens=200,
-                        temperature=0.8
-                    )
-                )
-                
-                ai_response = response.text
-                
-                # Add AI response to history
-                chat_history.append({'role': 'bot', 'text': ai_response})
-                
-            except google_exceptions.ResourceExhausted:
-                print("Gemini API quota exceeded")
-                ai_response = "I've reached my daily limit for responses. Please try again tomorrow."
-                chat_history.append({'role': 'bot', 'text': ai_response})
-            except Exception as e:
-                print(f"Gemini API Error: {e}")
-                ai_response = "Sorry, our tour guide is currently unavailable. Please try again shortly."
-                chat_history.append({'role': 'bot', 'text': ai_response})
-            
-            # Save updated chat history to session
-            session['chat_history'] = chat_history
-            
-            # Redirect to clear POST data and avoid form resubmission
-            return redirect(url_for('index'))
+        if "chat_history" not in session:
+            session["chat_history"] = []
 
-    return render_template('index.html', chat_history=chat_history)
+        chat_history = session["chat_history"]
+        chat_history.append({"role": "user", "text": user_input})
 
-@app.route('/clear')
+        # Build conversation context
+        conversation_text = TOUR_GUIDE_SYSTEM_PROMPT + "\n\n"
+        for msg in chat_history:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            conversation_text += f"{role}: {msg['text']}\n"
+        conversation_text += "Assistant:"
+
+        # --- FIX STARTS HERE ---
+        try:
+            # 1. Use client.models.generate_content (Correct method for new SDK)
+            # 2. Use 'gemini-1.5-flash' (Valid model name)
+            # 3. Pass 'conversation_text' (Correct variable name)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=conversation_text,
+                config={
+                    "temperature": 0.8,
+                    "max_output_tokens": 200
+                }
+            )
+
+            # Access the text property directly
+            ai_response = response.text.strip() if response.text else "I have no response."
+
+        except Exception as e:
+            print(f"Gemini Error details: {e}") # Improved logging
+            ai_response = "❌ AI service unavailable. Please try again later."
+        # --- FIX ENDS HERE ---
+        chat_history.append({"role": "bot", "text": ai_response})
+        session["chat_history"] = chat_history
+
+        return jsonify({"reply": ai_response})
+
+    except Exception as e:
+        print("Chat API Error:", e)
+        return jsonify({"reply": "⚠️ Something went wrong."}), 500
+
+# ---------------- CLEAR CHAT ----------------
+@app.route("/clear", methods=["POST"])
 def clear_chat():
-    """Route to clear the chat history"""
-    session.pop('chat_history', None)
-    return redirect(url_for('index'))
+    session.pop("chat_history", None)
+    return jsonify({"status": "cleared"})
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+# ---------------- RUN ----------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
