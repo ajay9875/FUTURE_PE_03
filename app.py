@@ -1,10 +1,11 @@
 from flask import Flask, request, render_template, session, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+#import google.genai as genai
+from google.api_core import exceptions as google_exceptions
 import os
-import uuid
 from dotenv import load_dotenv
-from groq import Groq
+#from google.genai import Client
+
+from groq import Groq  # 1. New Import
 
 load_dotenv()
 
@@ -14,31 +15,18 @@ app = Flask(__name__)
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY missing")
+
 app.secret_key = SECRET_KEY
 
-# MySQL Configuration for PythonAnywhere
-# Format: mysql+mysqlconnector://<YourUsername>:<YourDBPassword>@<YourHost>/<YourUsername>$<YourDBName>
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL")
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Get your API key from environment variable
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-db = SQLAlchemy(app)
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# Initialize the client
+client = Groq(api_key=GROQ_API_KEY)
 
-# ---------------- DATABASE MODEL ----------------
-class ChatMessage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.String(100), nullable=False, index=True)
-    role = db.Column(db.String(20), nullable=False)  # 'user' or 'assistant'
-    text = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
-# Create tables
-with app.app_context():
-    db.create_all()
-
-# ---------------- SYSTEM PROMPT ----------------
+# -------------------- SYSTEM PROMPT --------------------
 TOUR_GUIDE_SYSTEM_PROMPT = """
-You are 'Telangana Guide', an enthusiastic, knowledgeable, and friendly AI tour guide specializing in the beautiful state of Telangana, India.
+You are 'Alex', an enthusiastic, knowledgeable, and friendly AI tour guide specializing in the beautiful state of Telangana, India.
 Your primary role is to provide engaging, informative, and concise answers about Telangana's rich heritage, cities, tourist destinations, culture, history, cuisine, and festivals.
 Always maintain a conversational, welcoming, and helpful tone. Be energetic and excited about sharing the wonders of Telangana.
 
@@ -98,70 +86,71 @@ Your first priority is to deliver a comprehensive, satisfying response to the us
 - "Which aspect of Telangana travel can I assist with today - suggesting destinations, planning your budget, or giving you packing recommendations?"
 """
 
-# ---------------- ROUTES ----------------
-
+# -------------------- ROUTES --------------------
+# ---------------- PAGE ----------------
 @app.route("/")
 def index():
-    # Ensure every user has a unique ID in their browser session
-    if "user_sid" not in session:
-        session["user_sid"] = str(uuid.uuid4())
-    
-    user_sid = session["user_sid"]
-    # Load past chat from DB for this specific user
-    history = ChatMessage.query.filter_by(user_id=user_sid).order_by(ChatMessage.timestamp.asc()).all()
-    
-    # Format history for the template (matching your bot/user role names)
-    formatted_history = [{"role": "user" if m.role == "user" else "bot", "text": m.text} for m in history]
-    
-    return render_template("index.html", chat_history=formatted_history)
+    if "chat_history" not in session:
+        session["chat_history"] = []
 
+    session.permanent = True  # Make the session permanent so it lasts longer than the default
+    return render_template("index.html", chat_history=session["chat_history"])
+
+# -------------------- CHAT API --------------------
+@app.route("/chat", methods=["POST"])
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
         data = request.get_json()
         user_input = data.get("message", "").strip()
-        user_sid = session.get("user_sid")
 
-        if not user_sid:
-            return jsonify({"reply": "⚠️ Session expired. Please refresh."})
         if not user_input:
             return jsonify({"reply": "⚠️ Please enter a message."})
 
-        # 1. Save User Message to DB
-        new_user_msg = ChatMessage(user_id=user_sid, role='user', text=user_input)
-        db.session.add(new_user_msg)
-        db.session.commit()
+        if "chat_history" not in session:
+            session["chat_history"] = []
 
-        # 2. THE FIX: SLIDING WINDOW (Last 10 messages from DB)
-        db_history = ChatMessage.query.filter_by(user_id=user_sid)\
-            .order_by(ChatMessage.timestamp.desc())\
-            .limit(10).all()
-        
+        chat_history = session["chat_history"]
+
+        # --- THE FIX: SLIDING WINDOW ---
+        # We only take the LAST 10 messages for the AI's context window.
+        recent_context = chat_history[-10:]
+
+        # 3. Build the Message List for Groq
         messages = [{"role": "system", "content": TOUR_GUIDE_SYSTEM_PROMPT}]
         
-        # Reverse because 'desc' gave us newest first
-        for msg in reversed(db_history):
-            # Map DB roles to Groq roles
-            api_role = "assistant" if msg.role == "assistant" else "user"
-            messages.append({"role": api_role, "content": msg.text})
+        # CHANGED: Now looping through recent_context to prevent Token Overflows
+        for msg in recent_context:
+            role = "assistant" if msg["role"] == "bot" else "user"
+            messages.append({"role": role, "content": msg["text"]})
+        
+        # Add the current user input to the messages list
+        messages.append({"role": "user", "content": user_input})
 
-        # 3. Call Groq API
         try:
+            # 4. Call Groq API
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
                 temperature=0.7,
                 max_tokens=500 
             )
+
             ai_response = response.choices[0].message.content
+
         except Exception as e:
             print(f"Groq Error: {e}")
             ai_response = "❌ AI service busy. Please try again later."
 
-        # 4. Save AI Response to DB
-        new_bot_msg = ChatMessage(user_id=user_sid, role='assistant', text=ai_response)
-        db.session.add(new_bot_msg)
-        db.session.commit()
+        # 5. Update Full History (This keeps the chat visible in the UI)
+        chat_history.append({"role": "user", "text": user_input})
+        chat_history.append({"role": "bot", "text": ai_response})
+        
+        # Optional: Prevent the session cookie itself from becoming too large 
+        #-- CHANGE THIS LINE ---
+        # Instead of -50, use -10 to strictly store only the last 10 messages
+        session["chat_history"] = chat_history[-10:] 
+        session.modified = True # Force Flask to save the cookie
 
         return jsonify({"reply": ai_response})
 
@@ -169,13 +158,12 @@ def chat():
         print("Chat API Error:", e)
         return jsonify({"reply": "⚠️ Something went wrong."}), 500
 
+# ---------------- CLEAR CHAT ----------------
 @app.route("/clear", methods=["POST"])
 def clear_chat():
-    user_sid = session.get("user_sid")
-    if user_sid:
-        ChatMessage.query.filter_by(user_id=user_sid).delete()
-        db.session.commit()
+    session.pop("chat_history", None)
     return jsonify({"status": "cleared"})
 
+# ---------------- RUN ----------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
