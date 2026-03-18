@@ -1,9 +1,11 @@
 from flask import Flask, request, render_template, session, jsonify
-import google.genai as genai
+#import google.genai as genai
 from google.api_core import exceptions as google_exceptions
 import os
 from dotenv import load_dotenv
-from google.genai import Client
+#from google.genai import Client
+
+from groq import Groq  # 1. New Import
 
 load_dotenv()
 
@@ -17,10 +19,10 @@ if not SECRET_KEY:
 app.secret_key = SECRET_KEY
 
 # Get your API key from environment variable
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # Initialize the client
-client = Client(api_key=GEMINI_API_KEY)
+client = Groq(api_key=GROQ_API_KEY)
 
 # -------------------- SYSTEM PROMPT --------------------
 TOUR_GUIDE_SYSTEM_PROMPT = """
@@ -93,6 +95,7 @@ def index():
     return render_template("index.html", chat_history=session["chat_history"])
 
 # ---------------- CHAT API ----------------
+# -------------------- CHAT API --------------------
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
@@ -106,36 +109,36 @@ def chat():
             session["chat_history"] = []
 
         chat_history = session["chat_history"]
-        chat_history.append({"role": "user", "text": user_input})
 
-        # Build conversation context
-        conversation_text = TOUR_GUIDE_SYSTEM_PROMPT + "\n\n"
+        # 3. Build the Message List for Groq
+        # We start with the System Prompt, then add the history
+        messages = [{"role": "system", "content": TOUR_GUIDE_SYSTEM_PROMPT}]
+        
         for msg in chat_history:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            conversation_text += f"{role}: {msg['text']}\n"
-        conversation_text += "Assistant:"
+            # Groq expects 'assistant' instead of 'bot'
+            role = "assistant" if msg["role"] == "bot" else "user"
+            messages.append({"role": role, "content": msg["text"]})
+        
+        # Add the latest user input
+        messages.append({"role": "user", "content": user_input})
 
-        # --- FIX STARTS HERE ---
         try:
-            # 1. Use client.models.generate_content (Correct method for new SDK)
-            # 2. Use 'gemini-1.5-flash' (Valid model name)
-            # 3. Pass 'conversation_text' (Correct variable name)
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=conversation_text,
-                config={
-                    "temperature": 0.8,
-                    "max_output_tokens": 200
-                }
+            # 4. Call Groq API
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500  # Increased for those "Complete Answers"
             )
 
-            # Access the text property directly
-            ai_response = response.text.strip() if response.text else "I have no response."
+            ai_response = response.choices[0].message.content
 
         except Exception as e:
-            print(f"Gemini Error details: {e}") # Improved logging
-            ai_response = "❌ AI service unavailable. Please try again later."
-        # --- FIX ENDS HERE ---
+            print(f"Groq Error: {e}")
+            ai_response = "❌ Service busy. Please try again later."
+
+        # 5. Update History
+        chat_history.append({"role": "user", "text": user_input})
         chat_history.append({"role": "bot", "text": ai_response})
         session["chat_history"] = chat_history
 
